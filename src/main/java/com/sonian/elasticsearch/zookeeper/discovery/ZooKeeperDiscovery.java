@@ -20,6 +20,7 @@ import com.sonian.elasticsearch.zookeeper.client.ZooKeeperClient;
 import com.sonian.elasticsearch.zookeeper.client.ZooKeeperClientSessionExpiredException;
 import com.sonian.elasticsearch.zookeeper.client.ZooKeeperEnvironment;
 import org.elasticsearch.ElasticSearchException;
+import org.elasticsearch.Version;
 import org.elasticsearch.cluster.*;
 import org.elasticsearch.cluster.block.ClusterBlocks;
 import org.elasticsearch.cluster.metadata.MetaData;
@@ -28,7 +29,7 @@ import org.elasticsearch.cluster.node.DiscoveryNodeService;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.cluster.routing.allocation.AllocationService;
-import org.elasticsearch.common.UUID;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.inject.internal.Nullable;
@@ -53,8 +54,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static org.elasticsearch.cluster.ClusterState.newClusterStateBuilder;
-import static org.elasticsearch.cluster.node.DiscoveryNodes.newNodesBuilder;
 
 /**
  * @author imotov
@@ -123,8 +122,8 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
 
     @Override protected void doStart() throws ElasticSearchException {
         // note, we rely on the fact that its a new id each time we start, see FD and "kill -9" handling
-        String nodeId = UUID.randomBase64UUID();
-        localNode = new DiscoveryNode(settings.get("name"), nodeId, transportService.boundAddress().publishAddress(), discoveryNodeService.buildAttributes());
+        String nodeId = Strings.randomBase64UUID();
+        localNode = new DiscoveryNode(settings.get("name"), nodeId, transportService.boundAddress().publishAddress(), discoveryNodeService.buildAttributes(), Version.CURRENT);
         localNodePath = nodePath(localNode.id());
         latestDiscoNodes = new DiscoveryNodes.Builder().put(localNode).localNodeId(localNode.id()).build();
         initialStateSent.set(false);
@@ -196,7 +195,7 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
     }
 
 
-    @Override public void publish(ClusterState clusterState) {
+    @Override public void publish(ClusterState clusterState, AckListener arg1) {
         if (!master) {
             logger.warn("Shouldn't publish state when not master");
         }
@@ -225,7 +224,7 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
             return latestNodes;
         }
         // have not decided yet, just send the local node
-        return newNodesBuilder().put(localNode).localNodeId(localNode.id()).build();
+        return DiscoveryNodes.builder().put(localNode).localNodeId(localNode.id()).build();
     }
 
     @Override
@@ -352,11 +351,13 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
                 ClusterBlocks clusterBlocks = ClusterBlocks.builder().blocks(currentState.blocks()).addGlobalBlock(NO_MASTER_BLOCK).build();
                 // if this is a data node, clean the metadata and routing, since we want to recreate the indices and shards
                 if (currentState.nodes().localNode() != null && currentState.nodes().localNode().dataNode()) {
-                    metaData = MetaData.newMetaDataBuilder().build();
+                    metaData = MetaData.builder().build();
                     routingTable = RoutingTable.builder().build();
                 }
-                DiscoveryNodes.Builder builder = DiscoveryNodes.newNodesBuilder()
-                        .putAll(currentState.nodes());
+                DiscoveryNodes.Builder builder = DiscoveryNodes.builder();
+                for (DiscoveryNode n: currentState.nodes()){
+                	builder.put(n);
+                }
                 DiscoveryNode masterNode = currentState.nodes().masterNode();
                 if (masterNode != null) {
                     builder = builder.remove(masterNode.id());
@@ -366,7 +367,7 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
                     builder.put(localNode).localNodeId(localNode.id());
                 }
                 latestDiscoNodes = builder.build();
-                return newClusterStateBuilder().state(currentState)
+                return ClusterState.builder(currentState)
                         .blocks(clusterBlocks)
                         .nodes(latestDiscoNodes)
                         .metaData(metaData)
@@ -374,9 +375,18 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
                         .build();
             }
 
-            @Override public void clusterStateProcessed(ClusterState clusterState) {
-                sendInitialStateEventIfNeeded();
-            }
+			@Override
+			public void onFailure(String arg0, Throwable arg1) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void clusterStateProcessed(String arg0, ClusterState arg1,
+					ClusterState arg2) {
+				// TODO Auto-generated method stub
+				sendInitialStateEventIfNeeded();
+			}
         });
     }
 
@@ -388,7 +398,9 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
             @Override public ClusterState execute(ClusterState currentState) {
                 DiscoveryNodes.Builder builder = new DiscoveryNodes.Builder();
                 // Make sure that the current node is present
-                builder.putAll(currentState.nodes());
+                for (DiscoveryNode n: currentState.nodes()){
+                	builder.put(n);
+                }
                 if (currentState.nodes().localNode() == null) {
                     builder.put(localNode);
                 }
@@ -396,12 +408,19 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
                 builder.localNodeId(localNode.id()).masterNodeId(localNode.id());
                 latestDiscoNodes = builder.build();
                 ClusterBlocks clusterBlocks = ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(NO_MASTER_BLOCK).build();
-                return newClusterStateBuilder().state(currentState).nodes(builder).blocks(clusterBlocks).build();
+                return ClusterState.builder(currentState).nodes(builder).blocks(clusterBlocks).build();
             }
 
-            @Override public void clusterStateProcessed(ClusterState clusterState) {
+            @Override public void clusterStateProcessed(String arg0, ClusterState clusterState, ClusterState arg2) {
+            	//TODO Auto-generated method stub
                 sendInitialStateEventIfNeeded();
             }
+
+			@Override
+			public void onFailure(String arg0, Throwable arg1) {
+				// TODO Auto-generated method stub
+				
+			}
         });
 
         handleUpdateNodeList();
@@ -439,8 +458,10 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
                     added.removeAll(currentNodes);
                     logger.trace("Current nodes: [{}], new nodes: [{}], deleted: [{}], added[{}]", currentNodes, nodes, deleted, added);
                     if(!deleted.isEmpty() || !added.isEmpty()) {
-                        DiscoveryNodes.Builder builder = new DiscoveryNodes.Builder()
-                                .putAll(currentState.nodes());
+                        DiscoveryNodes.Builder builder = new DiscoveryNodes.Builder();
+                        for(DiscoveryNode n: currentState.nodes()){
+                        	builder.put(n);
+                        }
                         for (String nodeId : deleted) {
                             if (currentState.nodes().nodeExists(nodeId)) {
                                 builder.remove(nodeId);
@@ -463,13 +484,19 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
                             }
                         }
                         latestDiscoNodes = builder.build();
-                        return newClusterStateBuilder().state(currentState).nodes(latestDiscoNodes).build();
+                        return ClusterState.builder(currentState).nodes(latestDiscoNodes).build();
                     }
                 } catch (InterruptedException ex) {
                     Thread.currentThread().interrupt();
                 }
                 return currentState;
             }
+
+			@Override
+			public void onFailure(String arg0, Throwable arg1) {
+				// TODO Auto-generated method stub
+				
+			}
         });
     }
 
@@ -495,9 +522,17 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
                         return clusterState;
                     }
 
-                    @Override public void clusterStateProcessed(ClusterState clusterState) {
+                    @Override public void clusterStateProcessed(String arg0,
+							ClusterState arg1, ClusterState arg2) {
+                    	// TODO Auto-generated method stub
                         sendInitialStateEventIfNeeded();
                     }
+
+					@Override
+					public void onFailure(String arg0, Throwable arg1) {
+						// TODO Auto-generated method stub
+						
+					}
                 });
             } else {
                 if (logger.isTraceEnabled()) {
@@ -584,7 +619,8 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
     }
 
     private class NewClusterStateListener implements PublishClusterStateAction.NewClusterStateListener {
-        @Override public void onNewClusterState(ClusterState clusterState) {
+        @Override public void onNewClusterState(ClusterState clusterState, NewStateProcessed arg1) {
+        	// TODO Auto-generated method stub
             handleNewClusterStateFromMaster(clusterState);
         }
     }
@@ -683,7 +719,8 @@ public class ZooKeeperDiscovery extends AbstractLifecycleComponent<Discovery> im
         }
 
         @Override public void publish(ClusterState clusterState) {
-            publishClusterState.publish(clusterState);
+        	// TODO: fix this arg.
+            publishClusterState.publish(clusterState, null);
         }
 
         @Override public void addMaster(String masterNodeId) throws InterruptedException {
