@@ -21,6 +21,7 @@ import com.sonian.elasticsearch.action.zookeeper.NodesZooKeeperStatusResponse;
 import com.sonian.elasticsearch.action.zookeeper.TransportNodesZooKeeperStatusAction;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
@@ -48,7 +49,13 @@ public class RestZooKeeperStatusAction extends BaseRestHandler {
 
     @Override
     public void handleRequest(final RestRequest request, final RestChannel channel) {
-        String[] nodesIds = RestActions.splitNodes(request.param("nodeId"));
+        String nodesString = request.param("nodeId");
+		String[] nodesIds = null;
+		if (nodesString == null) {
+			nodesIds = Strings.EMPTY_ARRAY;
+		} else {
+			nodesIds = Strings.splitStringByCommaToArray(nodesString);
+		}
         NodesZooKeeperStatusRequest zooKeeperStatusRequest = new NodesZooKeeperStatusRequest(nodesIds);
         zooKeeperStatusRequest.zooKeeperTimeout(request.paramAsTime("timeout", TimeValue.timeValueSeconds(10)));
         transportNodesZooKeeperStatusAction.execute(zooKeeperStatusRequest, new ActionListener<NodesZooKeeperStatusResponse>() {
