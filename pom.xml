@@ -6,7 +6,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.sonian</groupId>
     <artifactId>elasticsearch-zookeeper</artifactId>
-    <version>0.90.1-SNAPSHOT</version>
+    <version>0.90.6-SNAPSHOT</version>
     <packaging>jar</packaging>
     <description>ZooKeeper plugin for ElasticSearch</description>
     <inceptionYear>2011</inceptionYear>
@@ -30,11 +30,21 @@
     </parent>
 
     <properties>
-        <elasticsearch.version>0.90.0</elasticsearch.version>
+        <elasticsearch.version>0.90.6</elasticsearch.version>
         <zookeeper.version>3.3.6</zookeeper.version>
     </properties>
 
     <repositories>
+      <repository>
+		<id>repo1.maven.org</id>
+		<url>http://repo1.maven.org/maven2</url>
+		<releases>
+			<enabled>true</enabled>
+		</releases>
+		<snapshots>
+			<enabled>false</enabled>
+		</snapshots>
+	  </repository>
       <repository>
         <id>sonatype</id>
         <name>elasticsearch sonatype repo</name>
